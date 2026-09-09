@@ -28,12 +28,58 @@ class AppController {
 
     // Subscribe to store updates
     gymStore.subscribe(() => this.render());
-    
+
     // Global Event Delegation
     this.bindEvents();
-    
-    // Initial Render
-    this.render();
+
+    // Show loading screen then init from API
+    this.showLoadingScreen();
+    this.init();
+  }
+
+  showLoadingScreen() {
+    this.mainContentEl.innerHTML = `
+      <div class="flex flex-col items-center justify-center min-h-screen gap-6">
+        <div class="relative w-20 h-20">
+          <div class="absolute inset-0 rounded-full border-4 border-brand-500/20"></div>
+          <div class="absolute inset-0 rounded-full border-4 border-transparent border-t-brand-400 animate-spin"></div>
+          <div class="absolute inset-0 flex items-center justify-center">
+            <span class="font-black text-brand-400 text-lg">BE</span>
+          </div>
+        </div>
+        <div class="text-center space-y-1">
+          <p class="font-outfit font-bold text-white text-lg">Body Engineers Fit Club</p>
+          <p class="text-slate-400 text-sm">Connecting to gym database...</p>
+        </div>
+      </div>
+    `;
+  }
+
+  async init() {
+    try {
+      await gymStore.initFromAPI();
+      this.render();
+    } catch (err) {
+      this.mainContentEl.innerHTML = `
+        <div class="flex flex-col items-center justify-center min-h-screen gap-6 p-8 text-center">
+          <div class="w-16 h-16 rounded-2xl bg-rose-500/20 flex items-center justify-center">
+            <i data-lucide="server-off" class="w-8 h-8 text-rose-400"></i>
+          </div>
+          <div class="space-y-2">
+            <h2 class="font-outfit font-bold text-white text-xl">Cannot Connect to API Server</h2>
+            <p class="text-slate-400 text-sm max-w-sm">Make sure the backend is running:</p>
+            <code class="block bg-dark-900 border border-slate-700 rounded-xl px-4 py-3 text-brand-300 text-xs font-mono mt-3">
+              cd server &amp;&amp; npm install &amp;&amp; node index.js
+            </code>
+            <p class="text-slate-500 text-xs mt-2">Then refresh this page at <b class="text-white">http://localhost:3001</b></p>
+          </div>
+          <button onclick="window.location.reload()" class="px-6 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-400 text-dark-950 font-black text-sm">
+            Retry Connection
+          </button>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+    }
   }
 
   render() {
@@ -257,8 +303,10 @@ class AppController {
       // 7. Reset DB seed data
       if (target.closest('#reset-db-btn')) {
         if (confirm("Reset all gym database records to initial seed data?")) {
-          gymStore.resetToSeedData();
-          this.showToast("Database restored to initial seed dataset!", "success");
+          (async () => {
+            await gymStore.resetToSeedData();
+            this.showToast("Database restored to initial seed dataset!", "success");
+          })();
         }
         return;
       }
@@ -332,42 +380,29 @@ class AppController {
         const exId = toggleExBtn.getAttribute('data-toggle-exercise-id');
         const dayId = toggleExBtn.getAttribute('data-day-id');
         const currentUser = gymStore.getCurrentUser();
-        const newState = gymStore.toggleExercise(currentUser.id, dayId, exId);
-        if (newState) {
-          sounds.playCheck();
-        }
+        (async () => {
+          const newState = await gymStore.toggleExercise(currentUser.id, dayId, exId);
+          if (newState) sounds.playCheck();
+        })();
         return;
       }
 
       // 18. Complete Daily Workout Celebration Confetti
       if (target.closest('#complete-workout-btn')) {
         const currentUser = gymStore.getCurrentUser();
-        gymStore.completeDailyWorkout(currentUser.id);
-        sounds.playSuccess();
-
-        if (window.confetti) {
-          window.confetti({
-            particleCount: 120,
-            spread: 80,
-            origin: { y: 0.6 }
-          });
-          setTimeout(() => {
-            window.confetti({
-              particleCount: 80,
-              angle: 60,
-              spread: 55,
-              origin: { x: 0 }
-            });
-            window.confetti({
-              particleCount: 80,
-              angle: 120,
-              spread: 55,
-              origin: { x: 1 }
-            });
-          }, 250);
-        }
-
-        this.showToast("🏆 Workout Crushed! Streak updated to " + (currentUser.attendanceStreakDays || 1) + " days! 🔥", "success");
+        (async () => {
+          await gymStore.completeDailyWorkout(currentUser.id);
+          sounds.playSuccess();
+          if (window.confetti) {
+            window.confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
+            setTimeout(() => {
+              window.confetti({ particleCount: 80, angle: 60, spread: 55, origin: { x: 0 } });
+              window.confetti({ particleCount: 80, angle: 120, spread: 55, origin: { x: 1 } });
+            }, 250);
+          }
+          const updatedUser = gymStore.getCurrentUser();
+          this.showToast(`🏆 Workout Crushed! Streak updated to ${updatedUser.attendanceStreakDays || 1} days! 🔥`, "success");
+        })();
         return;
       }
 
@@ -392,16 +427,23 @@ class AppController {
       // 20. Hydration Tracker +250ml
       if (target.closest('#add-water-glass-btn')) {
         const currentUser = gymStore.getCurrentUser();
-        const count = gymStore.incrementWater(currentUser.id);
-        sounds.playCheck();
-        this.showToast(`💧 Added 250ml! Today: ${(count * 0.25).toFixed(1)}L`, "success");
+        (async () => {
+          const count = await gymStore.incrementWater(currentUser.id);
+          sounds.playCheck();
+          this.showToast(`💧 Added 250ml! Today: ${(count * 0.25).toFixed(1)}L`, "success");
+        })();
         return;
       }
       if (target.closest('#reset-water-btn')) {
         const currentUser = gymStore.getCurrentUser();
-        currentUser.waterGlassesToday = 0;
-        gymStore.saveState();
-        this.showToast("Hydration counter reset.", "amber");
+        (async () => {
+          const user = gymStore.getClientById(currentUser.id);
+          if (user) {
+            user.waterGlassesToday = 0;
+            await gymStore.updateClient(currentUser.id, { waterGlassesToday: 0 });
+          }
+          this.showToast("Hydration counter reset.", "amber");
+        })();
         return;
       }
 
@@ -421,8 +463,10 @@ class AppController {
         const plan = gymStore.getWorkoutPlanForUser(selectedClientId);
         if (plan && plan.days[dIdx]) {
           plan.days[dIdx].exercises.splice(eIdx, 1);
-          gymStore.saveState();
-          this.showToast("Exercise removed.", "amber");
+          (async () => {
+            await gymStore.saveWorkoutPlan(selectedClientId, plan);
+            this.showToast("Exercise removed.", "amber");
+          })();
         }
         return;
       }
@@ -432,9 +476,11 @@ class AppController {
       if (saveWorkoutBtn) {
         const userId = saveWorkoutBtn.getAttribute('data-save-workout-plan-user-id');
         const plan = gymStore.getWorkoutPlanForUser(userId);
-        gymStore.saveWorkoutPlan(userId, plan);
-        sounds.playSuccess();
-        this.showToast("Workout routine synced to member's mobile app!", "success");
+        (async () => {
+          await gymStore.saveWorkoutPlan(userId, plan);
+          sounds.playSuccess();
+          this.showToast("Workout routine synced to member's mobile app!", "success");
+        })();
         return;
       }
 
@@ -651,11 +697,17 @@ class AppController {
     const form = document.getElementById('add-client-form');
     form?.addEventListener('submit', (e) => {
       e.preventDefault();
+      const submitBtn = form.querySelector('button[type=submit]');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Enrolling...'; }
       const formData = Object.fromEntries(new FormData(form).entries());
-      const newClient = gymStore.addClient(formData);
-      sounds.playSuccess();
-      this.closeModal();
-      this.showToast(`🎉 Enrolled ${newClient.fullName}! Member Code: ${newClient.memberCode}`, "success");
+      gymStore.addClient(formData).then(newClient => {
+        sounds.playSuccess();
+        this.closeModal();
+        this.showToast(`🎉 Enrolled ${newClient.fullName}! Member Code: ${newClient.memberCode}`, "success");
+      }).catch(err => {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Enroll Member'; }
+        this.showToast(`Error: ${err.message}`, 'error');
+      });
     });
   }
 
@@ -758,13 +810,18 @@ class AppController {
     const form = document.getElementById('log-payment-form');
     form?.addEventListener('submit', (e) => {
       e.preventDefault();
+      const submitBtn = form.querySelector('button[type=submit]');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Processing...'; }
       const formData = Object.fromEntries(new FormData(form).entries());
-      const newPayment = gymStore.logPayment(formData);
-      sounds.playSuccess();
-      this.closeModal();
-      this.showToast(`✅ Payment of ₹${formData.amount} logged! Next Due Date: ${formData.dueDate}`, "success");
-      // Open receipt automatically
-      setTimeout(() => this.openReceiptModal(newPayment.id), 300);
+      gymStore.logPayment(formData).then(newPayment => {
+        sounds.playSuccess();
+        this.closeModal();
+        this.showToast(`✅ Payment of ₹${formData.amount} logged! Next Due Date: ${formData.dueDate}`, "success");
+        setTimeout(() => this.openReceiptModal(newPayment.id), 300);
+      }).catch(err => {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Confirm & Generate Receipt'; }
+        this.showToast(`Error: ${err.message}`, 'error');
+      });
     });
   }
 
@@ -1026,11 +1083,17 @@ class AppController {
     const form = document.getElementById('edit-client-form');
     form?.addEventListener('submit', (e) => {
       e.preventDefault();
+      const submitBtn = form.querySelector('button[type=submit]');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving...'; }
       const formData = Object.fromEntries(new FormData(form).entries());
-      gymStore.updateClient(clientId, formData);
-      sounds.playSuccess();
-      this.closeModal();
-      this.showToast("Member profile updated!", "success");
+      gymStore.updateClient(clientId, formData).then(() => {
+        sounds.playSuccess();
+        this.closeModal();
+        this.showToast("Member profile updated!", "success");
+      }).catch(err => {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save Changes'; }
+        this.showToast(`Error: ${err.message}`, 'error');
+      });
     });
   }
 
@@ -1117,6 +1180,8 @@ class AppController {
     const form = document.getElementById('add-exercise-form');
     form?.addEventListener('submit', (e) => {
       e.preventDefault();
+      const submitBtn = form.querySelector('button[type=submit]');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Adding...'; }
       const data = Object.fromEntries(new FormData(form).entries());
       day.exercises.push({
         id: `ex_${Date.now()}`,
@@ -1130,10 +1195,15 @@ class AppController {
         videoGuideUrl: data.videoGuideUrl || "",
         completed: false
       });
-      gymStore.saveState();
-      sounds.playSuccess();
-      this.closeModal();
-      this.showToast(`Added ${data.name} to ${day.dayName}!`, "success");
+      const clientId = gymStore.editingWorkoutClientId || gymStore.getClients()[0]?.id;
+      gymStore.saveWorkoutPlan(clientId, gymStore.getWorkoutPlanForUser(clientId)).then(() => {
+        sounds.playSuccess();
+        this.closeModal();
+        this.showToast(`Added ${data.name} to ${day.dayName}!`, "success");
+      }).catch(err => {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Add Exercise'; }
+        this.showToast(`Error: ${err.message}`, 'error');
+      });
     });
   }
 
@@ -1211,12 +1281,18 @@ class AppController {
     const form = document.getElementById('edit-diet-form');
     form?.addEventListener('submit', (e) => {
       e.preventDefault();
+      const submitBtn = form.querySelector('button[type=submit]');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving...'; }
       const formData = Object.fromEntries(new FormData(form).entries());
       formData.meals = dietPlan.meals; // Preserve meal schedule
-      gymStore.saveDietPlan(userId, formData);
-      sounds.playSuccess();
-      this.closeModal();
-      this.showToast("Diet targets customized and saved!", "success");
+      gymStore.saveDietPlan(userId, formData).then(() => {
+        sounds.playSuccess();
+        this.closeModal();
+        this.showToast("Diet targets customized and saved!", "success");
+      }).catch(err => {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save Diet Targets'; }
+        this.showToast(`Error: ${err.message}`, 'error');
+      });
     });
   }
 }

@@ -1,0 +1,13 @@
+# Dependencies
+server/node_modules/
+
+# SQLite database (binary file — regenerated automatically on first run)
+server/gym.db
+server/gym.db-shm
+server/gym.db-wal
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
